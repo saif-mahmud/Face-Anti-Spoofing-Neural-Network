@@ -1,35 +1,32 @@
-import matplotlib.pyplot as plt
-import matplotlib
-import torch
-import torchvision.transforms as transforms
-import mobilenet_v1
-import numpy as np
+import argparse
+
 import cv2
 import dlib
-from utils.ddfa import ToTensorGjz, NormalizeGjz, str2bool
+import mobilenet_v1
+import numpy as np
 import scipy.io as sio
-from utils.inference import get_suffix, parse_roi_box_from_landmark, crop_img, predict_68pts, dump_to_ply, dump_vertex, \
-    draw_landmarks, predict_dense, parse_roi_box_from_bbox, get_colors, write_obj_with_colors
-from utils.cv_plot import plot_pose_box
-from utils.estimate_pose import parse_pose
-from utils.render import get_depths_image, cget_depths_image, cpncc
-from utils.paf import gen_img_paf, gen_anchor
-import argparse
+import torch
 import torch.backends.cudnn as cudnn
-import os
-from PIL import Image
+import torchvision.transforms as transforms
+from utils.ddfa import ToTensorGjz, NormalizeGjz, str2bool
+from utils.inference import crop_img, predict_dense, parse_roi_box_from_bbox
+from utils.paf import gen_anchor
+from utils.render import cget_depths_image
+
 
 STD_SIZE = 120
 
+
 def resize_depth(imgdepth):
-    img=np.array(imgdepth)
-    res=np.zeros((32,32,1),dtype=float)
+    img = np.array(imgdepth)
+    res = np.zeros((32, 32, 1), dtype=float)
     for x in range(32):
-        realx = 8*x
+        realx = 8 * x
         for y in range(32):
-            realy=8*y
-            res[x,y,0]=np.mean(img[realx:realx+8,realy:realy+8])
+            realy = 8 * y
+            res[x, y, 0] = np.mean(img[realx:realx + 8, realy:realy + 8])
     return res
+
 
 if __name__ == '__main__':
 
@@ -42,56 +39,59 @@ if __name__ == '__main__':
     folder = {}
     indice = 0
 
-    for phone in range(1,6):
-        for session in range(1,4):
-            for user in range(1,21):
-                for file in range(1,6):
-                    nom= str(user)
-                    if user<10:
-                        nom = '0'+nom
-                    currentFrame=0
-                    while(currentFrame<5):
-                        name = '/Volumes/G-DRIVE mobile USB/Train_files_OULU/Train_files/'+str(phone)+'_'+str(session)+'_'+nom+'_'+str(file)+'_'+str(currentFrame)+'.png'
-                        folder[str(indice)]=name
+    for phone in range(1, 6):
+        for session in range(1, 4):
+            for user in range(1, 21):
+                for file in range(1, 6):
+                    nom = str(user)
+                    if user < 10:
+                        nom = '0' + nom
+                    currentFrame = 0
+                    while (currentFrame < 5):
+                        name = '/Volumes/G-DRIVE mobile USB/Train_files_OULU/Train_files/' + str(phone) + '_' + str(
+                            session) + '_' + nom + '_' + str(file) + '_' + str(currentFrame) + '.png'
+                        folder[str(indice)] = name
 
                         currentFrame += 1
                         indice += 1
 
-    for phone in range(1,6):
-        for session in range(1,4):
-            for user in range(21,36):
-                for file in range(1,6):
-                    nom= str(user)
-                    if user<10:
-                        nom = '0'+nom
-                    currentFrame=0
-                    while(currentFrame<5):
-                        name = '/Volumes/G-DRIVE mobile USB/dev_files/Dev_files/'+str(phone)+'_'+str(session)+'_'+nom+'_'+str(file)+'_'+str(currentFrame)+'.png'
-                        folder[str(indice)]=name
+    for phone in range(1, 6):
+        for session in range(1, 4):
+            for user in range(21, 36):
+                for file in range(1, 6):
+                    nom = str(user)
+                    if user < 10:
+                        nom = '0' + nom
+                    currentFrame = 0
+                    while (currentFrame < 5):
+                        name = '/Volumes/G-DRIVE mobile USB/dev_files/Dev_files/' + str(phone) + '_' + str(
+                            session) + '_' + nom + '_' + str(file) + '_' + str(currentFrame) + '.png'
+                        folder[str(indice)] = name
 
                         currentFrame += 1
                         indice += 1
 
-    for phone in range(1,6):
-        for session in range(1,4):
-            for user in range(36,56):
-                for file in range(1,6):
-                    nom= str(user)
-                    if user<10:
-                        nom = '0'+nom
-                    currentFrame=0
-                    while(currentFrame<5):
-                        name = '/Volumes/G-DRIVE mobile USB/Test_files_OULU/Test_files/'+str(phone)+'_'+str(session)+'_'+nom+'_'+str(file)+'_'+str(currentFrame)+'.png'
-                        folder[str(indice)]=name
+    for phone in range(1, 6):
+        for session in range(1, 4):
+            for user in range(36, 56):
+                for file in range(1, 6):
+                    nom = str(user)
+                    if user < 10:
+                        nom = '0' + nom
+                    currentFrame = 0
+                    while (currentFrame < 5):
+                        name = '/Volumes/G-DRIVE mobile USB/Test_files_OULU/Test_files/' + str(phone) + '_' + str(
+                            session) + '_' + nom + '_' + str(file) + '_' + str(currentFrame) + '.png'
+                        folder[str(indice)] = name
 
                         currentFrame += 1
                         indice += 1
-    
+
     label = np.load('/Users/hugues/Documents/deep_learning_project/3DDFA-master/label.npz')
 
     Anchors = {}
     Labels_D = {}
-    
+
     # 1. Enregistrement des modèles pré-entraînés
     checkpoint_fp = 'models/phase1_wpdc_vdc.pth.tar'
     arch = 'mobilenet_1'
@@ -119,7 +119,7 @@ if __name__ == '__main__':
         img_ori = cv2.imread(folder[item])
         rects = face_detector(img_ori, 1)
         if len(rects) != 0:
-        
+
             for rect in rects:
                 bbox = [rect.left(), rect.top(), rect.right(), rect.bottom()]
                 roi_box = parse_roi_box_from_bbox(bbox)
@@ -131,27 +131,27 @@ if __name__ == '__main__':
                         input = input.cuda()
                     param = model(input)
                     param = param.squeeze().cpu().numpy().flatten().astype(np.float32)
-                
-            vertices_lst = [] 
+
+            vertices_lst = []
             vertices = predict_dense(param, roi_box)
             vertices_lst.append(vertices)
-                    
-            Anchor = gen_anchor(param=param,kernel_size=args.paf_size)
-            Anchors[item]=Anchor
-            
-            depths_img = cget_depths_image(img_ori, vertices_lst, tri - 1) 
-            if(int(item)%100==0):
+
+            Anchor = gen_anchor(param=param, kernel_size=args.paf_size)
+            Anchors[item] = Anchor
+
+            depths_img = cget_depths_image(img_ori, vertices_lst, tri - 1)
+            if int(item) % 100 == 0:
                 print(item)
-            if label[item]==1: #real face
-                Labels_D[item]=resize_depth(depths_img)
-            else: #spoof face
-                Labels_D[item]=np.zeros((32,32,1),dtype=float)
+            if label[item] == 1:  # real face
+                Labels_D[item] = resize_depth(depths_img)
+            else:  # spoof face
+                Labels_D[item] = np.zeros((32, 32, 1), dtype=float)
         else:
-            #Case our cropping didn't work
-            Anchors[item] = np.zeros((2,4096),dtype=float)
-            print('fausse image:'+item)
-            Labels_D[item] = np.zeros((32,32,1),dtype=float)
-                    
-    np.savez("anchors.npz",**Anchors)
-    np.savez("labels_D.npz",**Labels_D)
-    np.savez("folder.npz",**folder)
+            # Case our cropping didn't work
+            Anchors[item] = np.zeros((2, 4096), dtype=float)
+            print('fausse image:' + item)
+            Labels_D[item] = np.zeros((32, 32, 1), dtype=float)
+
+    np.savez("anchors.npz", **Anchors)
+    np.savez("labels_D.npz", **Labels_D)
+    np.savez("folder.npz", **folder)
