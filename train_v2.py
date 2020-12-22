@@ -1,3 +1,4 @@
+import sys
 import warnings
 
 import matplotlib.pyplot as plt
@@ -5,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.metrics import accuracy_score
+from sklearn.metrics import precision_recall_fscore_support as score
 from tqdm import tqdm
 
 from Models import Anti_spoof_net_CNN
@@ -103,10 +105,10 @@ def train_CNN(cnn_model, optimizer, trainloader, criterion, cnn_device, n_epoch=
 
             # handle NaN:
             if torch.norm((outputs_D != outputs_D).float()) == 0:
-                # if epoch == (n_epoch - 1):
-                #     imshow_np(i, np.transpose(images[0, :, :, :].cpu().numpy(), (1, 2, 0)), mode='_raw')
-                #     imshow_np(i, np.transpose(outputs_D[0, :, :, :].cpu().detach().numpy(), (1, 2, 0)),
-                #               mode=('_depth' + str(epoch)))
+                if epoch == (n_epoch - 1):
+                    imshow_np(i, np.transpose(images[0, :, :, :].cpu().numpy(), (1, 2, 0)), mode='_raw')
+                    imshow_np(i, np.transpose(outputs_D[0, :, :, :].cpu().detach().numpy(), (1, 2, 0)),
+                              mode=('_depth' + str(epoch)))
 
                 loss = criterion(outputs_D, labels_D)
 
@@ -119,7 +121,7 @@ def train_CNN(cnn_model, optimizer, trainloader, criterion, cnn_device, n_epoch=
         print('[CNN: Epoch: %d - loss: %.3f]' % (epoch + 1, running_loss / total))
 
     print('CNN: Finished Training')
-    torch.save(cnn_model.state_dict(), 'saved_models/cnn_model_v2')
+    torch.save(cnn_model.state_dict(), 'saved_models/cnn_model')
 
 
 def train_RNN(rnn_model, pretrained_cnn, optimizer, trainloader, spoof_labels, criterion, cnn_device, rnn_device,
@@ -140,7 +142,7 @@ def train_RNN(rnn_model, pretrained_cnn, optimizer, trainloader, spoof_labels, c
 
     for epoch in range(n_epoch):
 
-        print('\n[RNN Epoch: %2d / %2d]' % (epoch + 1, n_epoch))
+        print('\n[RNN: Epoch: %2d / %2d]' % (epoch + 1, n_epoch))
 
         running_loss = 0.0
 
@@ -171,24 +173,19 @@ def train_RNN(rnn_model, pretrained_cnn, optimizer, trainloader, spoof_labels, c
 
                 outputs_F = outputs_F.view(5, 2)
 
-                # print(label)
-                # print(outputs_F)
-
                 loss = criterion(outputs_F, label.long())
-                # print(loss)
                 loss.backward()
                 optimizer.step()
 
                 running_loss += loss.item()
 
                 outputs_F = nn.Softmax(dim=1)(outputs_F)
-                # print(outputs_F)
                 Y_TEST.extend(label.cpu().detach().numpy())
                 Y_PRED.extend(outputs_F.cpu().detach().numpy())
 
-        acc = classification_accuracy(Y_TEST, Y_PRED)
-        # acc = 5.2
-        print('[RNN: Epoch: %d - loss: %.3f | training acc: %.5f]' % (epoch + 1, running_loss / len(trainloader), acc))
+        acc, precision, recall, fscore = classification_accuracy(Y_TEST, Y_PRED)
+        print('[Epoch: %d - loss: %.5f | acc: %.5f | prec: %.5f | rec: %.5f | f1: %.5f]' % (
+        epoch + 1, running_loss / len(trainloader), acc, precision, recall, fscore))
 
     print('RNN: Finished Training')
     torch.save(rnn_model.state_dict(), 'saved_models/rnn_model_w_pretrained_cnn')
@@ -200,7 +197,10 @@ def classification_accuracy(y_true: list, y_pred: list):
 
     y_pred_class = np.argmax(y_pred, axis=1)
 
-    return accuracy_score(y_true, y_pred_class)
+    acc = accuracy_score(y_true, y_pred_class)
+    precision, recall, fscore, support = score(y_true, y_pred_class, average='macro')
+
+    return acc, precision, recall, fscore
 
 
 if __name__ == '__main__':
@@ -215,12 +215,13 @@ if __name__ == '__main__':
     cnn_optimizer = torch.optim.Adam(cnn_model.parameters(), lr=3e-3, betas=(0.9, 0.999), eps=1e-08)
     rnn_optimizer = torch.optim.Adam(rnn_model.parameters(), lr=3e-3, betas=(0.9, 0.999), eps=1e-08)
 
-    # train_CNN(cnn_model=cnn_model, optimizer=cnn_optimizer, trainloader=trainloader_D, criterion=criterion,
-    #           cnn_device=gpu0, n_epoch=2)
+    if str(sys.argv[1]) == 'cnn':
+        train_CNN(cnn_model=cnn_model, optimizer=cnn_optimizer, trainloader=trainloader_D, criterion=cnn_criterion,
+                  cnn_device=gpu0, n_epoch=40)
 
-    cnn_model.load_state_dict(torch.load('saved_models/cnn_model_v2'))
-    cnn_model.eval()
+    elif str(sys.argv[1]) == 'rnn':
+        cnn_model.load_state_dict(torch.load('saved_models/cnn_model'))
+        cnn_model.eval()
 
-    train_RNN(rnn_model=rnn_model, pretrained_cnn=cnn_model, optimizer=rnn_optimizer, trainloader=trainloader_D,
-              spoof_labels=data_labels_train,
-              criterion=rnn_criterion, cnn_device=gpu0, rnn_device=gpu0, n_epoch=10)
+        train_RNN(rnn_model=rnn_model, pretrained_cnn=cnn_model, optimizer=rnn_optimizer, trainloader=trainloader_D,
+                  spoof_labels=data_labels_train, criterion=rnn_criterion, cnn_device=gpu0, rnn_device=gpu0, n_epoch=40)
