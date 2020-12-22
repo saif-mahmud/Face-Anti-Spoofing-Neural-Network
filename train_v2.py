@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import precision_recall_fscore_support as score
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 from Models import Anti_spoof_net_CNN
@@ -66,18 +67,26 @@ def get_dataloader():
         data_labels_D[int(item), :, :, :] = Labels_D[item]
         data_labels[int(item)] = Labels[item]
 
-    training_part = 45 / 55
-    n_train = int(n * training_part)
+    # print(data_images.shape)
+    # print(data_labels_D.shape)
+    # print(data_labels.shape)
 
-    # Training set
-    data_images_train = data_images[:n_train, :, :, :]
-    data_labels_D_train = data_labels_D[:n_train, :, :, :]
-    data_labels_train = data_labels[:n_train]
+    data_images_train, data_images_test, data_labels_train, data_labels_test = train_test_split(data_images, data_labels, test_size = 0.20, random_state = 42)
+    data_images_train, data_images_test, data_labels_D_train, data_labels_D_test = train_test_split(data_images, data_labels_D, test_size=0.20, random_state=42)
 
-    # Test set
-    data_images_test = data_images[n_train:, :, :, :]
-    data_labels_D_test = data_labels_D[n_train:, :, :, :]
-    data_labels_test = data_labels[n_train:]
+    # print(data_labels_train.shape)
+    # print(data_labels_train.shape)
+    # print(data_labels_D_train.shape)
+
+    # print(data_images_test.shape)
+    # print(data_labels_test.shape)
+    # print(data_labels_D_test.shape)
+
+    # unique, counts = np.unique(data_labels_train, return_counts=True)
+    # print(unique, counts)
+
+    # unique, counts = np.unique(data_labels_test, return_counts=True)
+    # print(unique, counts)
 
     trainloader_D, testloader_D = prepare_dataloader_D(data_images_train, data_images_test, data_labels_D_train,
                                                        data_labels_D_test)
@@ -95,7 +104,7 @@ def train_CNN(cnn_model, optimizer, trainloader, criterion, cnn_device, n_epoch=
         running_loss = 0.0
         total = 0
 
-        for i, data in tqdm(enumerate(trainloader, 0)):
+        for i, data in tqdm(enumerate(trainloader, 0), total=len(trainloader)):
             images, labels_D = data
             images, labels_D = images.to(cnn_device), labels_D.to(cnn_device)
 
@@ -108,7 +117,7 @@ def train_CNN(cnn_model, optimizer, trainloader, criterion, cnn_device, n_epoch=
                 if epoch == (n_epoch - 1):
                     imshow_np(i, np.transpose(images[0, :, :, :].cpu().numpy(), (1, 2, 0)), mode='_raw')
                     imshow_np(i, np.transpose(outputs_D[0, :, :, :].cpu().detach().numpy(), (1, 2, 0)),
-                              mode=('_depth' + str(epoch)))
+                              mode=('_depth_epoch_' + str(epoch + 1)))
 
                 loss = criterion(outputs_D, labels_D)
 
@@ -146,7 +155,7 @@ def train_RNN(rnn_model, pretrained_cnn, optimizer, trainloader, spoof_labels, c
 
         running_loss = 0.0
 
-        for i, data in tqdm(enumerate(trainloader, 0)):
+        for i, data in tqdm(enumerate(trainloader, 0), total=len(trainloader)):
             images, labels_D = data
             images = images.to(cnn_device)
 
@@ -185,7 +194,7 @@ def train_RNN(rnn_model, pretrained_cnn, optimizer, trainloader, spoof_labels, c
 
         acc, precision, recall, fscore = classification_accuracy(Y_TEST, Y_PRED)
         print('[Epoch: %d - loss: %.5f | acc: %.5f | prec: %.5f | rec: %.5f | f1: %.5f]' % (
-        epoch + 1, running_loss / len(trainloader), acc, precision, recall, fscore))
+            epoch + 1, running_loss / len(trainloader), acc, precision, recall, fscore))
 
     print('RNN: Finished Training')
     torch.save(rnn_model.state_dict(), 'saved_models/rnn_model_w_pretrained_cnn')
@@ -197,10 +206,72 @@ def classification_accuracy(y_true: list, y_pred: list):
 
     y_pred_class = np.argmax(y_pred, axis=1)
 
+    # print(y_true)
+    # print()
+    # print(y_pred)
+
     acc = accuracy_score(y_true, y_pred_class)
     precision, recall, fscore, support = score(y_true, y_pred_class, average='macro')
 
     return acc, precision, recall, fscore
+
+
+def predict(testloader, spoof_labels, cnn_model, rnn_model, cnn_criterion, rnn_criterion, device):
+    threshold = 0.1
+
+    cnn_model = cnn_model.to(device)
+    cnn_model.eval()
+
+    rnn_model = rnn_model.to(device)
+    rnn_model.eval()
+
+    one = torch.ones(5, 1, 32, 32).to(device)
+    zero = torch.zeros(5, 1, 32, 32).to(device)
+
+    hidden = (torch.zeros(1, 1, 100, device=device),
+              torch.zeros(1, 1, 100, device=device))
+
+    Y_TEST = list()
+    Y_PRED = list()
+
+    # cnn_running_loss = 0.0
+    rnn_running_loss = 0.0
+
+    for i, data in tqdm(enumerate(testloader, 0), total=len(testloader)):
+        images, labels_D = data
+        images, labels_D = images.to(device), labels_D.to(device)
+
+        with torch.no_grad():
+            D, T = cnn_model(images)
+
+            # cnn_loss = cnn_criterion(D, labels_D)
+            # cnn_running_loss += cnn_loss.item()
+
+            # Non_rigid_registration_layer
+            V = torch.where(D >= threshold, one, zero)
+            U = T * V
+            F = U
+
+            hidden = repackage_hidden(hidden)
+            outputs_F, hidden = rnn_model(F, hidden)
+
+            label = spoof_labels[(i * 5):(i * 5) + 5]
+            label = torch.from_numpy(label)
+            label = label.to(device)
+
+            outputs_F = outputs_F.view(5, 2)
+
+            rnn_loss = rnn_criterion(outputs_F, label.long())
+            rnn_running_loss += rnn_loss.item()
+
+            outputs_F = nn.Softmax(dim=1)(outputs_F)
+
+            Y_TEST.extend(label.cpu().detach().numpy())
+            Y_PRED.extend(outputs_F.cpu().detach().numpy())
+
+    acc, precision, recall, fscore = classification_accuracy(Y_TEST, Y_PRED)
+    print('[Prediction: loss: %.5f | acc: %.5f | prec: %.5f | rec: %.5f | f1: %.5f]' %
+          (rnn_running_loss / len(testloader), acc, precision, recall, fscore))
 
 
 if __name__ == '__main__':
@@ -217,7 +288,7 @@ if __name__ == '__main__':
 
     if str(sys.argv[1]) == 'cnn':
         train_CNN(cnn_model=cnn_model, optimizer=cnn_optimizer, trainloader=trainloader_D, criterion=cnn_criterion,
-                  cnn_device=gpu0, n_epoch=40)
+                  cnn_device=gpu0, n_epoch=35)
 
     elif str(sys.argv[1]) == 'rnn':
         cnn_model.load_state_dict(torch.load('saved_models/cnn_model'))
@@ -225,3 +296,10 @@ if __name__ == '__main__':
 
         train_RNN(rnn_model=rnn_model, pretrained_cnn=cnn_model, optimizer=rnn_optimizer, trainloader=trainloader_D,
                   spoof_labels=data_labels_train, criterion=rnn_criterion, cnn_device=gpu0, rnn_device=gpu0, n_epoch=40)
+
+    elif str(sys.argv[1]) == 'pred':
+        cnn_model.load_state_dict(torch.load('saved_models/cnn_model'))
+        rnn_model.load_state_dict(torch.load('saved_models/rnn_model_w_pretrained_cnn'))
+
+        predict(testloader=testloader_D, spoof_labels=data_labels_test, cnn_model=cnn_model, rnn_model=rnn_model,
+                cnn_criterion=cnn_criterion, rnn_criterion=rnn_criterion, device=gpu0)
