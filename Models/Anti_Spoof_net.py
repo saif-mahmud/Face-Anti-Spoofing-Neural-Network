@@ -5,6 +5,9 @@ import torch
 import torch.nn as nn
 
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 class Anti_spoof_net(nn.Module):
 
     def __init__(self):
@@ -13,18 +16,22 @@ class Anti_spoof_net(nn.Module):
         self.threshold = 0.1
         self.CNN = Anti_spoof_net_CNN.Anti_spoof_net_CNN()
         self.RNN = Anti_spoof_net_RNN.Anti_spoof_net_RNN()
+        
+        self.one = torch.ones(5, 1, 32, 32).to(device)
+        self.zero = torch.zeros(5, 1, 32, 32).to(device)
 
     def forward(self, x):
 
         D, T = self.CNN(x)
 
         # Non_rigid_registration_layer
-        V = torch.where(D >= self.threshold, torch.ones(5, 1, 32, 32), torch.zeros(5, 1, 32, 32))
-        U = T * V
-        F = U
-
-        R = self.RNN(F)
-
+        # V = torch.where(D >= self.threshold, self.one, self.zero)
+        # U = T * V
+        # F = U
+        
+        # R = self.RNN(F)
+        R = None
+    
         return D, R
 
 
