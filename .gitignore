@@ -1,3 +1,6 @@
 *.pdf
 *.dms
+.idea/
+Models/.ipynb_checkpoints/*
+Models/__pycache__/*
 
