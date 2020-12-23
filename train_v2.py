@@ -19,6 +19,8 @@ print('GPU count:', torch.cuda.device_count())
 gpu0 = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 gpu1 = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
+BATCH_SIZE = 5
+
 
 def imshow_np(i, img, mode: str):
     height, width, depth = img.shape
@@ -45,8 +47,8 @@ def prepare_dataloader_D(data_images_train, data_images_test, data_labels_D_trai
     testset_D = torch.utils.data.TensorDataset(torch.tensor(np.transpose(data_images_test, (0, 3, 1, 2))),
                                                torch.tensor(data_labels_D_test))
 
-    trainloader_D = torch.utils.data.DataLoader(trainset_D, batch_size=5, shuffle=False, drop_last=True)
-    testloader_D = torch.utils.data.DataLoader(testset_D, batch_size=5, shuffle=False, drop_last=True)
+    trainloader_D = torch.utils.data.DataLoader(trainset_D, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
+    testloader_D = torch.utils.data.DataLoader(testset_D, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
 
     return trainloader_D, testloader_D
 
@@ -140,8 +142,8 @@ def train_RNN(rnn_model, pretrained_cnn, optimizer, trainloader, spoof_labels, c
     pretrained_cnn = pretrained_cnn.to(cnn_device)
     rnn_model = rnn_model.to(rnn_device)
 
-    one = torch.ones(5, 1, 32, 32).to(cnn_device)
-    zero = torch.zeros(5, 1, 32, 32).to(cnn_device)
+    one = torch.ones(BATCH_SIZE, 1, 32, 32).to(cnn_device)
+    zero = torch.zeros(BATCH_SIZE, 1, 32, 32).to(cnn_device)
 
     hidden = (torch.zeros(1, 1, 100, device=rnn_device),
               torch.zeros(1, 1, 100, device=rnn_device))
@@ -175,12 +177,12 @@ def train_RNN(rnn_model, pretrained_cnn, optimizer, trainloader, spoof_labels, c
 
             # handle NaN:
             if torch.norm((outputs_F != outputs_F).float()) == 0:
-                label = spoof_labels[(i * 5): (i * 5) + 5]
+                label = spoof_labels[(i * BATCH_SIZE): (i * BATCH_SIZE) + BATCH_SIZE]
 
                 label = torch.from_numpy(label)
                 label = label.to(rnn_device)
 
-                outputs_F = outputs_F.view(5, 2)
+                outputs_F = outputs_F.view(BATCH_SIZE, 2)
 
                 loss = criterion(outputs_F, label.long())
                 loss.backward()
@@ -225,8 +227,8 @@ def predict(testloader, spoof_labels, cnn_model, rnn_model, cnn_criterion, rnn_c
     rnn_model = rnn_model.to(device)
     rnn_model.eval()
 
-    one = torch.ones(5, 1, 32, 32).to(device)
-    zero = torch.zeros(5, 1, 32, 32).to(device)
+    one = torch.ones(BATCH_SIZE, 1, 32, 32).to(device)
+    zero = torch.zeros(BATCH_SIZE, 1, 32, 32).to(device)
 
     hidden = (torch.zeros(1, 1, 100, device=device),
               torch.zeros(1, 1, 100, device=device))
@@ -255,11 +257,11 @@ def predict(testloader, spoof_labels, cnn_model, rnn_model, cnn_criterion, rnn_c
             hidden = repackage_hidden(hidden)
             outputs_F, hidden = rnn_model(F, hidden)
 
-            label = spoof_labels[(i * 5):(i * 5) + 5]
+            label = spoof_labels[(i * BATCH_SIZE):(i * BATCH_SIZE) + BATCH_SIZE]
             label = torch.from_numpy(label)
             label = label.to(device)
 
-            outputs_F = outputs_F.view(5, 2)
+            outputs_F = outputs_F.view(BATCH_SIZE, 2)
 
             rnn_loss = rnn_criterion(outputs_F, label.long())
             rnn_running_loss += rnn_loss.item()
