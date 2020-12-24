@@ -22,22 +22,19 @@ def producer(q):
         ret, frame = cap.read()
 
         face_locations = face_recognition.face_locations(frame, number_of_times_to_upsample=0, model="hog")
-
         if len(face_locations) > 0:
             top, right, bottom, left = face_locations[0]
-            print(top, right, bottom, left)
-            face_frame = frame[top:bottom, left:right]
-            face_frame = cv2.resize(face_frame, (256, 256))
 
-            frame = cv2.rectangle(frame, (top, left), (bottom, right), (0, 255, 0), 2)
-            cv2.imshow('frame', frame)
+            image = frame[top:bottom, left:right]
+            image = cv2.resize(image, (256, 256))
 
-            q.put(face_frame)
+            q.put(image)
 
+            frame = cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
         else:
             frame = cv2.putText(frame, 'No Face Detected', (20, 20), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            cv2.imshow('frame', frame)
-            continue
+
+        cv2.imshow('frame', frame)
 
         key = cv2.waitKey(1)
         if key == ord('q'):
@@ -48,7 +45,8 @@ def producer(q):
 
 
 def consumer(q):
-    url = 'http://192.168.1.199:5000/spoof/predict'
+    # url = 'https://tracker.onudaan.com:5000/common/spoof/predict' # public [doesn't work]
+    url = 'http://192.168.1.199:5000/common/spoof/predict' # private
     images = list()
 
     while True:
@@ -78,7 +76,7 @@ def consumer(q):
 
                     for i in range(len(labels)):
                         probability = str(round(float(probs[i]), 5))
-                        fname = timestamp.strftime("%d%m%Y_%H%M%S_%f") + '_' + labels[i] + '_' + probability + '.png'
+                        fname = labels[i] + '_' + timestamp.strftime("%d%m%Y_%H%M%S_%f") + '_' + probability + '.png'
                         cv2.imwrite(os.path.join(save_dir, fname), image)
 
                 else:
