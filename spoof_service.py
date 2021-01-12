@@ -15,7 +15,7 @@ app = Flask(__name__)
 
 @app.route("/spoof", methods=['POST', 'GET'])
 def intro():
-    return '--- Facial Spoof Detection System ---'
+    return '--- Facial Spoof Detection System ---\n'
 
 
 @app.route("/spoof/predict", methods=['POST', 'GET'])
@@ -28,11 +28,11 @@ def detect_spoof():
     result = {}
 
     try:
-        prediction, probability = infer(images=images)
+        prediction, score = infer(images=images)
         result['predicted_class'] = prediction
-        result['probability'] = probability
+        result['score'] = str(score)
         result['exception'] = None
-        print(result)
+        # print(result)
 
         return Response(json.dumps(result, indent=4), mimetype='application/json')
 

@@ -2,7 +2,7 @@ import json
 import os
 from datetime import datetime
 from multiprocessing import Process, Queue
-
+import sys
 import cv2
 import face_recognition
 import numpy as np
@@ -14,12 +14,20 @@ save_dir = 'results'
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
+if str(sys.argv[1]) == 'webcam':
+    src = 0
+elif str(sys.argv[1]) == 'mobile':
+    src = str(sys.argv[2])
+
 
 def producer(q):
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(src)
 
     while True:
         ret, frame = cap.read()
+
+        if str(sys.argv[1]) == 'mobile':
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
 
         face_locations = face_recognition.face_locations(frame, number_of_times_to_upsample=0, model="hog")
         if len(face_locations) > 0:
@@ -45,8 +53,7 @@ def producer(q):
 
 
 def consumer(q):
-    # url = 'https://tracker.onudaan.com:5000/common/spoof/predict' # public [doesn't work]
-    url = 'http://192.168.1.199:5000/common/spoof/predict' # private
+    url = 'http://192.168.1.200:5000/spoof/predict'  # private [need tigerit vpn]
     images = list()
 
     while True:
@@ -57,27 +64,26 @@ def consumer(q):
 
             if len(images) == BATCH_SIZE:
                 images = np.array(images)
-                print(images.shape)
+                print('[PAYLOAD SIZE]', images.shape)
 
                 payload = {'images': images.tolist()}
                 r = requests.post(url, json=payload)
-                print(r.status_code)
+                print('[STATUS CODE]', r.status_code)
 
                 parsed = json.loads(r.content)
-                print(json.dumps(parsed, indent=4, sort_keys=True))
+                print('[SERVER RESPONSE]', json.dumps(parsed, indent=4, sort_keys=True))
 
                 images = list()
 
                 timestamp = datetime.now()
 
                 if r.json()['exception'] is None:
-                    labels = r.json()['predicted_class']
-                    probs = r.json()['probability']
+                    label = r.json()['predicted_class']
+                    score = r.json()['score']
 
-                    for i in range(len(labels)):
-                        probability = str(round(float(probs[i]), 5))
-                        fname = labels[i] + '_' + timestamp.strftime("%d%m%Y_%H%M%S_%f") + '_' + probability + '.png'
-                        cv2.imwrite(os.path.join(save_dir, fname), image)
+                    score = str(round(float(score), 3))
+                    fname = score + '_[' + timestamp.strftime("%d%m%Y_%H%M%S_%f") + ']_' + label + '.png'
+                    cv2.imwrite(os.path.join(save_dir, fname), image)
 
                 else:
                     fname = 'exception_' + timestamp.strftime("%d%m%Y_%H%M%S_%f") + '.png'

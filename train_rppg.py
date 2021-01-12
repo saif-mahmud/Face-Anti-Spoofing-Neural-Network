@@ -161,8 +161,8 @@ def train_CNN(cnn_model, optimizer, trainloader, criterion, cnn_device, n_epoch=
             # handle NaN:
             if torch.norm((outputs_D != outputs_D).float()) == 0:
                 if epoch == (n_epoch - 1):
-                    imshow_np(i, np.transpose(images[0, :, :, :].cpu().numpy(), (1, 2, 0)), mode='_raw')
-                    imshow_np(i, np.transpose(outputs_D[0, :, :, :].cpu().detach().numpy(), (1, 2, 0)),
+                    imshow_np(i, np.transpose(images[-1, :, :, :].cpu().numpy(), (1, 2, 0)), mode='_raw')
+                    imshow_np(i, np.transpose(outputs_D[-1, :, :, :].cpu().detach().numpy(), (1, 2, 0)),
                               mode=('_depth_epoch_' + str(epoch + 1)))
 
                 loss = criterion(outputs_D, labels_D)
@@ -173,10 +173,23 @@ def train_CNN(cnn_model, optimizer, trainloader, criterion, cnn_device, n_epoch=
                 total += labels_D.size(0)
                 running_loss += loss.item()
 
+                norm_D = torch.linalg.norm(outputs_D[-1, :, :, :])
+                with open('./training_log/depth_norm.csv', 'a') as fd:
+                    csv_row = '\n' + str(epoch) + ', ' + str(i) + ', ' + str(norm_D.cpu().detach().numpy())
+                    fd.write(csv_row)
+
         print('[CNN: Epoch: %d - MSE loss on depth maps: %.3f]' % (epoch + 1, running_loss / total))
 
+        # model checkpoint
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': cnn_model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': (running_loss / total),
+        }, 'checkpoints/siw/cnn.pt')
+
     print('CNN: Finished Training')
-    torch.save(cnn_model.state_dict(), 'saved_models/cnn_model')
+    torch.save(cnn_model.state_dict(), 'saved_models/siw/cnn_model')
 
 
 def train_RNN(rnn_model, pretrained_cnn, trainloader, rppg_label, optimizer, criterion, cnn_device, rnn_device,
@@ -307,7 +320,7 @@ if __name__ == '__main__':
 
     if str(sys.argv[1]) == 'cnn':
         train_CNN(cnn_model=cnn_model, optimizer=cnn_optimizer, trainloader=trainloader_D, criterion=criterion,
-                  cnn_device=gpu0, n_epoch=35)
+                  cnn_device=gpu1, n_epoch=75)
 
     elif str(sys.argv[1]) == 'rnn':
         img_dataloader, rppg_data = get_rppg_dataloader()
