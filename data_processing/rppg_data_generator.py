@@ -10,7 +10,7 @@ from imutils import face_utils
 from tqdm import tqdm
 
 DATA_DIR = '/mnt/79d2aab6-d2be-40fa-b606-682b8f995226/ppg/siw_data'
-RPPG_DIR = '/mnt/79d2aab6-d2be-40fa-b606-682b8f995226/ppg/fft_rppg'
+RPPG_DIR = '/mnt/79d2aab6-d2be-40fa-b606-682b8f995226/ppg/kaggle/SSA_RPPG_GT/ssa_rppg_siw'
 
 
 def get_face_coordinates(face_file: str):
@@ -45,7 +45,7 @@ def get_rppg_data(n_frames=5):
             if 'Live' in rppg_fname:
                 rppg_gt = np.load(os.path.join(rppg_dir, rppg_fname))
             else:
-                rppg_gt = np.zeros((50,))
+                rppg_gt = np.zeros((100,))
             RPPG_GT.append(rppg_gt)
 
         cap = cv2.VideoCapture(video_src)
@@ -91,8 +91,8 @@ def get_rppg_data(n_frames=5):
 
 
 def get_rppg_dataloader():
-    img_file = 'data_processing/img_data.npy'
-    rppg_file = 'data_processing/rppg.npy'
+    img_file = 'data_processing/img_ssa_data.npy'
+    rppg_file = 'data_processing/ssa_rppg.npy'
 
     print(img_file, os.path.exists(img_file))
     print(rppg_file, os.path.exists(rppg_file))

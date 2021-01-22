@@ -1,3 +1,4 @@
+import os
 import sys
 import warnings
 
@@ -7,12 +8,10 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import precision_recall_fscore_support as score
-from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 from Models import Anti_spoof_net_CNN
 from Models import Anti_spoof_net_RNN
-from data_processing.rppg_data_generator import get_rppg_dataloader
 
 warnings.filterwarnings("ignore")
 
@@ -20,13 +19,13 @@ print('GPU count:', torch.cuda.device_count())
 gpu0 = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 gpu1 = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
-BATCH_SIZE = 5
+BATCH_SIZE = 10
 LAMBDA = 0.015
-CLASS_NAMES = {0: 'Live', 1: 'Spoof'}
 
 
 def imshow_np(i, img, mode: str):
     height, width, depth = img.shape
+    img = np.divide(img, 255)
 
     if depth == 1:
         img = img[:, :, 0]
@@ -41,7 +40,7 @@ def thresh_plot(score_data):
     ax.scatter(score_data[:, 0], score_data[:, 1], c=np.vectorize(colors.get)(score_data[:, 2]))
 
     plt.grid(True)
-    plt.savefig('thresh_plt.png')
+    plt.savefig('thresh_plt_oulu.png')
 
 
 def tune_hyperparam(score_data, thresh_range=[25000, 200000]):
@@ -80,70 +79,62 @@ def repackage_hidden(h):
         return tuple(repackage_hidden(v) for v in h)
 
 
-def prepare_dataloader_D(data_images_train, data_images_test, data_labels_D_train, data_labels_D_test):
-    trainset_D = torch.utils.data.TensorDataset(torch.tensor(np.transpose(data_images_train, (0, 3, 1, 2))),
-                                                torch.tensor(data_labels_D_train))
-    testset_D = torch.utils.data.TensorDataset(torch.tensor(np.transpose(data_images_test, (0, 3, 1, 2))),
-                                               torch.tensor(data_labels_D_test))
+def get_rppg(rppg_dir, subdir):
+    rppg = list()
 
-    trainloader_D = torch.utils.data.DataLoader(trainset_D, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
-    testloader_D = torch.utils.data.DataLoader(testset_D, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
+    for ppg_file in sorted(os.listdir(os.path.join(rppg_dir, subdir))):
+        ppg = np.load(os.path.join(rppg_dir, subdir, ppg_file))
+        rppg.append(ppg)
 
-    return trainloader_D, testloader_D
+    return np.array(rppg)
 
 
-def get_dataloader():
-    Images = np.load('data_processing/siw_npz/images.npz')
-    Labels_D = np.load('data_processing/siw_npz/labels_D.npz')
-    Labels = np.load('data_processing/siw_npz/label.npz')
+def get_oulu_data(split: str, mode='cnn'):
+    frames_dir = 'oulu_processed/frames'
+    depth_dir = 'oulu_processed/depth_map'
+    rppg_dir = 'oulu_processed/rppg'
+    labels_dir = 'oulu_processed/labels'
 
-    n = len(Images)
+    subdirs = {'train': 'Train_files', 'dev': 'Dev_files', 'test': 'Test_files'}
 
-    data_images = np.zeros((n, 256, 256, 3), dtype=np.float32)
-    data_labels_D = np.zeros((n, 32, 32, 1), dtype=np.float32)
-    data_labels = np.zeros((n), dtype=np.float32)
+    if mode == 'cnn':
+        frames = np.load(os.path.join(frames_dir, subdirs[split], 'frames.npy'))
+        labels = np.load(os.path.join(labels_dir, subdirs[split], 'labels.npy'))
 
-    for item in Images.files:
-        data_images[int(item), :, :, :] = Images[item]
-        data_labels_D[int(item), :, :, :] = Labels_D[item]
-        data_labels[int(item)] = Labels[item]
+    elif mode == 'rnn':
+        frames = np.load(os.path.join(frames_dir, subdirs[split], 'rppg_frames.npy'))
+        labels = np.load(os.path.join(labels_dir, subdirs[split], 'rppg_labels.npy'))
 
-    # print(data_images.shape)
-    # print(data_labels_D.shape)
-    # print(data_labels.shape)
+    print(frames.shape)
+    print(labels.shape)
 
-    data_images_train, data_images_test, data_labels_train, data_labels_test = train_test_split(data_images,
-                                                                                                data_labels,
-                                                                                                test_size=0.20,
-                                                                                                random_state=42)
-    data_images_train, data_images_test, data_labels_D_train, data_labels_D_test = train_test_split(data_images,
-                                                                                                    data_labels_D,
-                                                                                                    test_size=0.20,
-                                                                                                    random_state=42)
+    dmap = np.load(os.path.join(depth_dir, subdirs[split], 'depth_maps.npy'))
+    rppg = get_rppg(rppg_dir, subdirs[split])
 
-    # print(data_labels_train.shape)
-    # print(data_labels_train.shape)
-    # print(data_labels_D_train.shape)
+    print(dmap.shape)
+    print(rppg.shape)
 
-    # print(data_images_test.shape)
-    # print(data_labels_test.shape)
-    # print(data_labels_D_test.shape)
+    if mode == 'cnn':
+        dataset = torch.utils.data.TensorDataset(torch.tensor(np.transpose(frames, (0, 3, 1, 2)), dtype=torch.float32),
+                                                 torch.tensor(dmap, dtype=torch.float32))
+        data_loader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
+        rppg_data = torch.tensor(rppg, dtype=torch.float32)
 
-    # unique, counts = np.unique(data_labels_train, return_counts=True)
-    # print(unique, counts)
+        if split is 'train':
+            return data_loader
+        else:
+            return data_loader, labels, rppg_data
 
-    # unique, counts = np.unique(data_labels_test, return_counts=True)
-    # print(unique, counts)
+    elif mode == 'rnn':
+        img_dataset = torch.utils.data.TensorDataset(
+            torch.tensor(np.transpose(frames, (0, 3, 1, 2)), dtype=torch.float32))
+        img_dataloader = torch.utils.data.DataLoader(img_dataset, batch_size=10, shuffle=False, drop_last=True)
+        rppg_data = torch.tensor(rppg, dtype=torch.float32)
 
-    trainloader_D, testloader_D = prepare_dataloader_D(data_images_train, data_images_test, data_labels_D_train,
-                                                       data_labels_D_test)
-
-    return trainloader_D, testloader_D, data_labels_train, data_labels_test
+        return img_dataloader, rppg_data
 
 
-def train_CNN(cnn_model, optimizer, trainloader, criterion, cnn_device, n_epoch=10):
-    cnn_model = cnn_model.to(cnn_device)
-
+def train_CNN(cnn_model, optimizer, trainloader, criterion, cnn_device, n_epoch):
     for epoch in range(n_epoch):
 
         print('\n[CNN Epoch: %2d / %2d]' % (epoch + 1, n_epoch))
@@ -162,8 +153,8 @@ def train_CNN(cnn_model, optimizer, trainloader, criterion, cnn_device, n_epoch=
             # handle NaN:
             if torch.norm((outputs_D != outputs_D).float()) == 0:
                 if epoch == (n_epoch - 1):
-                    imshow_np(i, np.transpose(images[-1, :, :, :].cpu().numpy(), (1, 2, 0)), mode='_raw')
-                    imshow_np(i, np.transpose(outputs_D[-1, :, :, :].cpu().detach().numpy(), (1, 2, 0)),
+                    imshow_np(i, np.transpose(images[0, :, :, :].cpu().numpy(), (1, 2, 0)), mode='_raw')
+                    imshow_np(i, np.transpose(outputs_D[0, :, :, :].cpu().detach().numpy(), (1, 2, 0)),
                               mode=('_depth_epoch_' + str(epoch + 1)))
 
                 loss = criterion(outputs_D, labels_D)
@@ -187,10 +178,10 @@ def train_CNN(cnn_model, optimizer, trainloader, criterion, cnn_device, n_epoch=
             'model_state_dict': cnn_model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'loss': (running_loss / total),
-        }, 'checkpoints/siw/cnn.pt')
+        }, 'checkpoints/oulu/cnn.pt')
 
     print('CNN: Finished Training')
-    torch.save(cnn_model.state_dict(), 'saved_models/siw/cnn_model')
+    torch.save(cnn_model.state_dict(), 'saved_models/oulu/cnn_model')
 
 
 def train_RNN(rnn_model, pretrained_cnn, trainloader, rppg_label, optimizer, criterion, cnn_device, rnn_device,
@@ -229,7 +220,8 @@ def train_RNN(rnn_model, pretrained_cnn, trainloader, rppg_label, optimizer, cri
             optimizer.zero_grad()
             hidden = repackage_hidden(hidden)
             outputs_F, hidden = rnn_model(F, hidden)
-            outputs_F = outputs_F.view(100)  # ssa dim = (100, )
+            # print(outputs_F.shape)
+            outputs_F = outputs_F.view(50)
 
             # handle NaN:
             if torch.norm((outputs_F != outputs_F).float()) == 0:
@@ -239,10 +231,18 @@ def train_RNN(rnn_model, pretrained_cnn, trainloader, rppg_label, optimizer, cri
 
                 running_loss += loss.item()
 
-        print('[Epoch: %d - ssa rppg MSE loss: %.5f' % (epoch + 1, running_loss / len(trainloader)))
+        print('[Epoch: %d - rppg MSE loss: %.5f' % (epoch + 1, running_loss / len(trainloader)))
+
+        # model checkpoint
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': cnn_model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': (running_loss / len(trainloader)),
+        }, 'checkpoints/oulu/rnn.pt')
 
     print('RNN: Finished Training')
-    torch.save(rnn_model.state_dict(), 'saved_models/rnn_ssa_rppg')
+    torch.save(rnn_model.state_dict(), 'saved_models/oulu/rnn_model_rppg')
 
 
 def classification_accuracy(y_true, y_pred):
@@ -252,7 +252,7 @@ def classification_accuracy(y_true, y_pred):
     return acc, precision, recall, fscore
 
 
-def predict(testloader, spoof_labels, cnn_model, rnn_model, device):
+def predict(testloader, spoof_labels, rppg_label, cnn_model, rnn_model, device):
     threshold = 0.1
 
     cnn_model = cnn_model.to(device)
@@ -282,7 +282,7 @@ def predict(testloader, spoof_labels, cnn_model, rnn_model, device):
 
             hidden = repackage_hidden(hidden)
             outputs_F, hidden = rnn_model(F, hidden)
-            outputs_F = outputs_F.view(100)
+            outputs_F = outputs_F.view(50)
 
             label = spoof_labels[(i * BATCH_SIZE):(i * BATCH_SIZE) + BATCH_SIZE][-1]
 
@@ -290,26 +290,32 @@ def predict(testloader, spoof_labels, cnn_model, rnn_model, device):
             norm_F = torch.linalg.norm(outputs_F)
 
             score = torch.square(norm_F) + (LAMBDA * torch.square(norm_D))
-            # print('clf. score: %.5f | label: %d' % (score, label))
+            with open('./training_log/val_scores.csv', 'a') as fd:
+                csv_row = '\n' + \
+                          str(i) + ', ' + \
+                          str(label) + ', ' + \
+                          str(norm_D.cpu().detach().numpy()) + ', ' + \
+                          str(norm_F.cpu().detach().numpy()) + ', ' + \
+                          str(score.cpu().detach().numpy())
+                fd.write(csv_row)
 
             score_data.append(list((i, float(score.cpu().detach().numpy()), float(label))))
 
             fig, ax = plt.subplots()
             ax.plot(outputs_F.cpu().detach().numpy())
+            ax.plot(rppg_label[i])
             plt.grid(True)
-            plt.ylabel('rppg_ssa_signal')
-            plt.title(str('Label : ' + CLASS_NAMES[int(label)] + ' | SSA rPPG Norm: ' + str(norm_F.cpu().detach().numpy())))
-            rppg_path = 'ssa_rppg_vis/' + str('val_batch_' + str(i) + '_' + CLASS_NAMES[int(label)])
+            plt.ylabel('rppg_signal')
+            plt.title(str('Label : ' + CLASS_NAMES[int(label)] + ' | rPPG Norm: ' + str(norm_F.cpu().detach().numpy())))
+            rppg_path = 'rppg_vis_oulu/' + str('val_batch_' + str(i) + '_' + CLASS_NAMES[int(label)])
             plt.savefig(rppg_path)
 
-    # print(score_data)
+    print(score_data)
     np.save('thresh_test.npy', score_data)
     thresh_plot(np.array(score_data))
 
 
 if __name__ == '__main__':
-    trainloader_D, testloader_D, data_labels_train, data_labels_test = get_dataloader()
-
     cnn_model = Anti_spoof_net_CNN.Anti_spoof_net_CNN()
     rnn_model = Anti_spoof_net_RNN.Anti_spoof_net_RNN()
 
@@ -319,20 +325,23 @@ if __name__ == '__main__':
     rnn_optimizer = torch.optim.Adam(rnn_model.parameters(), lr=3e-3, betas=(0.9, 0.999), eps=1e-08)
 
     if str(sys.argv[1]) == 'cnn':
+        trainloader_D = get_oulu_data(split='train', mode='cnn')
         train_CNN(cnn_model=cnn_model, optimizer=cnn_optimizer, trainloader=trainloader_D, criterion=criterion,
-                  cnn_device=gpu1, n_epoch=75)
+                  cnn_device=gpu0, n_epoch=1)
 
     elif str(sys.argv[1]) == 'rnn':
-        img_dataloader, rppg_data = get_rppg_dataloader()
-        cnn_model.load_state_dict(torch.load('saved_models/siw/cnn_model'))
+        img_dataloader, rppg_data = get_oulu_data(split='train', mode='rnn')
+        cnn_model.load_state_dict(torch.load('saved_models/oulu/cnn_model'))
         cnn_model.eval()
 
         train_RNN(rnn_model=rnn_model, pretrained_cnn=cnn_model, optimizer=rnn_optimizer, trainloader=img_dataloader,
-                  rppg_label=rppg_data, criterion=criterion, cnn_device=gpu1, rnn_device=gpu1, n_epoch=75)
+                  rppg_label=rppg_data, criterion=criterion, cnn_device=gpu0, rnn_device=gpu0, n_epoch=75)
 
     elif str(sys.argv[1]) == 'pred':
-        cnn_model.load_state_dict(torch.load('saved_models/siw/cnn_model'))
-        rnn_model.load_state_dict(torch.load('saved_models/rnn_ssa_rppg'))
+        cnn_model.load_state_dict(torch.load('saved_models/oulu/cnn_model'))
+        rnn_model.load_state_dict(torch.load('saved_models/oulu/rnn_model_rppg'))
 
-        predict(testloader=testloader_D, spoof_labels=data_labels_test, cnn_model=cnn_model, rnn_model=rnn_model,
-                device=gpu1)
+        testloader_D, data_labels_test, rppg_label = get_oulu_data(split='dev')
+
+        predict(testloader=testloader_D, spoof_labels=data_labels_test, rppg_label=rppg_label, cnn_model=cnn_model, rnn_model=rnn_model,
+                device=gpu0)

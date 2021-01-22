@@ -25,6 +25,6 @@ class Anti_spoof_net_RNN(nn.Module):
 
         lstm_out, hidden = self.LSTM(F, hidden)  # lstm_out: [batch_size, 1, 100]
         R = self.fc(lstm_out)  # R: [batch_size, 1, 100]
-        R = torch.fft.fft(input=R, n=50, norm="ortho").real
+        # R = torch.fft.fft(input=R, n=50, norm="ortho").real
 
         return R, hidden

@@ -16,7 +16,7 @@ device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 5
 
 cnn_model = Anti_spoof_net_CNN.Anti_spoof_net_CNN()
-cnn_model.load_state_dict(torch.load('saved_models/cnn_model'))
+cnn_model.load_state_dict(torch.load('saved_models/siw/cnn_model'))
 cnn_model.to(device)
 cnn_model.eval()
 
@@ -30,7 +30,7 @@ zero = torch.zeros(BATCH_SIZE, 1, 32, 32, device=device)
 
 threshold = 0.1  # Non-rigid registration layer depth map threshld
 LAMBDA = 0.015  # depth map weight in clf. score
-SCORE_THRESHOLD = 75000  # classification score threshold
+SCORE_THRESHOLD = 10000  # classification score threshold
 CLASS_NAMES = {0: 'Live', 1: 'Spoof'}
 
 
@@ -65,6 +65,7 @@ def infer(images: np.ndarray):
         outputs_F, hidden = rnn_model(F, hidden)
         outputs_F = outputs_F.view(50)
 
+        print(D[-1, :, :, :].shape)
         norm_D = torch.linalg.norm(D[-1, :, :, :])
         norm_F = torch.linalg.norm(outputs_F)
 
